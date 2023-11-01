@@ -5,7 +5,7 @@ use std::{
 };
 
 fn generate_response_body(code: u16, len: u16, body: &str) -> String {
-    let status_line = format!(
+    let header = format!(
         "HTTP/1.1 {} {}\r\n",
         code,
         if code == 200 { "OK" } else { "Not Found" }
@@ -18,7 +18,7 @@ fn generate_response_body(code: u16, len: u16, body: &str) -> String {
     } else {
         "".to_string()
     };
-    return format!("{}{}{}", status_line, content_header, body);
+    return format!("{}{}{}", header, content_header, body);
 }
 
 fn parse_request(stream: &TcpStream) -> Result<String, String> {
@@ -41,7 +41,9 @@ fn parse_request(stream: &TcpStream) -> Result<String, String> {
 
     match *command {
         "GET" => {
-            let response = if arg.starts_with("/") && arg.len() > 1 {
+            let response = if *arg == "/" {
+                "HTTP/1.1 200 OK\r\n\r\n".to_string()
+            } else if arg.starts_with("/") && arg.len() > 1 {
                 let input_str = arg.split("/").last().unwrap();
                 generate_response_body(200, input_str.len() as u16, input_str)
             } else {
