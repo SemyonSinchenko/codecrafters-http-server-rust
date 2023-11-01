@@ -24,7 +24,7 @@ fn parse_request(stream: &TcpStream) -> Result<String, String> {
 
     match *command {
         "GET" => {
-            let response = if arg.starts_with("/") {
+            let response = if *arg == "/" {
                 "HTTP/1.1 200 OK\r\n\r\n"
             } else {
                 "HTTP/1.1 404 Not Found\r\n\r\n"
