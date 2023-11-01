@@ -33,6 +33,8 @@ fn parse_request(stream: &TcpStream) -> Result<String, String> {
             Err(_e) => return Err("error parsing request".to_string()),
         };
 
+    println!("got request of {} lines", lines.len());
+
     if lines.len() == 0 {
         return Err("empty string was passed".to_string());
     }
