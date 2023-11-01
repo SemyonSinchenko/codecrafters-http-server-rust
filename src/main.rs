@@ -4,6 +4,8 @@ use std::{
     net::{TcpListener, TcpStream},
 };
 
+use itertools::Itertools;
+
 fn generate_response_body(code: u16, len: u16, body: &str) -> String {
     let header = format!(
         "HTTP/1.1 {} {}\r\n",
@@ -18,19 +20,24 @@ fn generate_response_body(code: u16, len: u16, body: &str) -> String {
 }
 
 fn parse_request(stream: &TcpStream) -> Result<String, String> {
-    let mut request_reader = BufReader::new(stream);
-    let mut request: String = Default::default();
+    let request_reader = BufReader::new(stream);
 
-    if request_reader.read_line(&mut request).is_err() {
-        return Err("error parsing request".to_string());
-    }
+    let lines: Vec<String> =
+        match request_reader
+            .lines()
+            .fold_ok(Vec::<String>::new(), |mut acc, s| {
+                acc.push(s);
+                acc
+            }) {
+            Ok(_lines) => _lines,
+            Err(_e) => return Err("error parsing request".to_string()),
+        };
 
-    if request.is_empty() {
+    if lines.len() == 0 {
         return Err("empty string was passed".to_string());
     }
 
-    let words: Vec<&str> = request.split_ascii_whitespace().collect();
-
+    let words: Vec<&str> = lines.get(0).unwrap().split_ascii_whitespace().collect();
     let (command, arg) = (words.get(0).unwrap_or(&""), words.get(1).unwrap_or(&""));
 
     println!("got {} {}", command, arg);
@@ -42,6 +49,21 @@ fn parse_request(stream: &TcpStream) -> Result<String, String> {
             } else if arg.starts_with("/echo/") && arg.len() > 6 {
                 let input_str = &arg[6..];
                 generate_response_body(200, input_str.len() as u16, input_str)
+            } else if *arg == "/user-agent" {
+                if lines.len() < 4 {
+                    return Err("wrong request".to_string());
+                } else {
+                    let user_agent = lines.get(3).unwrap();
+                    if !user_agent.starts_with("User-Agent: ") {
+                        return Err("wrong request, bad header".to_string());
+                    } else {
+                        generate_response_body(
+                            200,
+                            (user_agent.len() - 12) as u16,
+                            user_agent[11..].trim(),
+                        )
+                    }
+                }
             } else {
                 "HTTP/1.1 404 NOT FOUND\r\n\r\n".to_string()
             };
