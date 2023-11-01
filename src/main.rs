@@ -2,6 +2,7 @@
 use std::{
     io::{BufRead, BufReader, BufWriter, Write},
     net::{TcpListener, TcpStream},
+    thread,
 };
 
 fn generate_response_body(code: u16, len: u16, body: &str) -> String {
@@ -71,17 +72,29 @@ fn parse_request(stream: &TcpStream) -> Result<String, String> {
     }
 }
 
-fn handle_connection(mut stream: TcpStream) -> Result<(), String> {
-    let response = parse_request(&stream);
+fn handle_connection(stream: std::io::Result<TcpStream>) -> Result<(), String> {
+    match stream {
+        Ok(mut _stream) => {
+            println!("accepted new connection");
+            let response = parse_request(&_stream);
 
-    match response {
-        Ok(_s) => {
-            println!("{}", _s);
-            BufWriter::new(&stream).write_all(_s.as_bytes()).unwrap();
-            let _ = stream.flush();
+            match response {
+                Ok(_s) => {
+                    println!("{}", _s);
+                    BufWriter::new(&_stream).write_all(_s.as_bytes()).unwrap();
+                    let _ = _stream.flush();
+                    Ok(())
+                }
+                Err(_e) => {
+                    println!("error happened! {}", _e);
+                    Ok(())
+                }
+            }
+        }
+        Err(_e) => {
+            println!("error happened! {}", _e);
             Ok(())
         }
-        Err(e) => Err(e),
     }
 }
 
@@ -90,14 +103,8 @@ fn main() {
 
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
     for stream in listener.incoming() {
-        match stream {
-            Ok(_stream) => {
-                println!("accepted new connection");
-                handle_connection(_stream).expect("should sent a response");
-            }
-            Err(e) => {
-                println!("error: {}", e);
-            }
-        }
+        thread::spawn(move || {
+            let _ = handle_connection(stream);
+        });
     }
 }
