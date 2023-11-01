@@ -4,7 +4,7 @@ use std::{
     net::{TcpListener, TcpStream},
 };
 
-fn generate_response_body(code: u8, len: u8, body: &str) -> String {
+fn generate_response_body(code: u16, len: u16, body: &str) -> String {
     let header = format!(
         "HTTP/1.1 {} {}\r\n",
         code,
@@ -45,7 +45,7 @@ fn parse_request(stream: &TcpStream) -> Result<String, String> {
                 "HTTP/1.1 200 OK\r\n\r\n".to_string()
             } else if arg.starts_with("/echo/") {
                 let input_str = &arg[5..];
-                generate_response_body(200, input_str.len() as u8, input_str)
+                generate_response_body(200, input_str.len() as u16, input_str)
             } else {
                 generate_response_body(400, 0, "")
             };
@@ -60,7 +60,7 @@ fn handle_connection(mut stream: TcpStream) -> Result<(), String> {
 
     match response {
         Ok(_s) => {
-            println!(response);
+            println!("{}", _s);
             BufWriter::new(&stream).write_all(_s.as_bytes()).unwrap();
             let _ = stream.flush();
             Ok(())
