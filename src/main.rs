@@ -1,5 +1,8 @@
 // Uncomment this block to pass the first stage
-use std::{net::{TcpListener, TcpStream}, io::{BufWriter, Write}};
+use std::{
+    io::{BufWriter, Write},
+    net::{TcpListener, TcpStream},
+};
 
 fn handle_connection(mut stream: TcpStream) -> std::io::Result<()> {
     let res = "HTTP/1.1 200 OK\r\n\r\n";
@@ -18,10 +21,7 @@ fn main() {
         match stream {
             Ok(_stream) => {
                 println!("accepted new connection");
-                match handle_connection(_stream) {
-                    Ok(_r) => println!("sent a response"),
-                    Err(e) => println!("error happened: {}", e)
-                }
+                handle_connection(_stream).expect("should sent a response");
             }
             Err(e) => {
                 println!("error: {}", e);
