@@ -10,14 +10,10 @@ fn generate_response_body(code: u16, len: u16, body: &str) -> String {
         code,
         if code == 200 { "OK" } else { "Not Found" }
     );
-    let content_header = if code == 200 {
-        format!(
-            "Content-Type: text/plain\r\nContent-Length: {}\r\n\r\n",
-            len
-        )
-    } else {
-        "".to_string()
-    };
+    let content_header = format!(
+        "Content-Type: text/plain\r\nContent-Length: {}\r\n\r\n",
+        len
+    );
     return format!("{}{}{}", header, content_header, body);
 }
 
@@ -47,7 +43,7 @@ fn parse_request(stream: &TcpStream) -> Result<String, String> {
                 let input_str = arg.split("/").last().unwrap();
                 generate_response_body(200, input_str.len() as u16, input_str)
             } else {
-                generate_response_body(400, 0, "")
+                "HTTP/1.1 404 NOT FOUND\r\n\r\n".to_string()
             };
             Ok(response)
         }
