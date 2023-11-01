@@ -43,7 +43,7 @@ fn parse_request(stream: &TcpStream) -> Result<String, String> {
         "GET" => {
             let response = if *arg == "/" {
                 "HTTP/1.1 200 OK\r\n\r\n".to_string()
-            } else if arg.starts_with("/") && arg.len() > 1 {
+            } else if arg.starts_with("/echo/") && arg.len() > 6 {
                 let input_str = arg.split("/").last().unwrap();
                 generate_response_body(200, input_str.len() as u16, input_str)
             } else {
