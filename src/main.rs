@@ -4,6 +4,23 @@ use std::{
     net::{TcpListener, TcpStream},
 };
 
+fn generate_response_body(code: u8, len: u8, body: &str) -> String {
+    let header = format!(
+        "HTTP/1.1 {} {}\r\n",
+        code,
+        if code == 200 { "OK" } else { "Not Found" }
+    );
+    let content_header = if code == 200 {
+        format!(
+            "Content-Type: text/plain\r\nContent-Length: {}\r\n\r\n",
+            len
+        )
+    } else {
+        "".to_string()
+    };
+    return format!("{}{}{}", header, content_header, body);
+}
+
 fn parse_request(stream: &TcpStream) -> Result<String, String> {
     let mut request_reader = BufReader::new(stream);
     let mut request: String = Default::default();
@@ -25,11 +42,14 @@ fn parse_request(stream: &TcpStream) -> Result<String, String> {
     match *command {
         "GET" => {
             let response = if *arg == "/" {
-                "HTTP/1.1 200 OK\r\n\r\n"
+                "HTTP/1.1 200 OK\r\n\r\n".to_string()
+            } else if arg.starts_with("/echo/") {
+                let input_str = &arg[5..];
+                generate_response_body(200, input_str.len() as u8, input_str)
             } else {
-                "HTTP/1.1 404 Not Found\r\n\r\n"
+                generate_response_body(400, 0, "")
             };
-            Ok(response.to_string())
+            Ok(response)
         }
         s => Err(format!("unknown command {}", s)),
     }
@@ -40,6 +60,7 @@ fn handle_connection(mut stream: TcpStream) -> Result<(), String> {
 
     match response {
         Ok(_s) => {
+            println!(response);
             BufWriter::new(&stream).write_all(_s.as_bytes()).unwrap();
             let _ = stream.flush();
             Ok(())
