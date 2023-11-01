@@ -20,6 +20,8 @@ fn parse_request(stream: &TcpStream) -> Result<String, String> {
 
     let (command, arg) = (words.get(0).unwrap_or(&""), words.get(1).unwrap_or(&""));
 
+    println!("got {} {}", command, arg);
+
     match *command {
         "GET" => {
             let response = if arg.starts_with("/") {
