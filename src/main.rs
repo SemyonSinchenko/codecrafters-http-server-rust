@@ -45,16 +45,16 @@ impl Response {
                     content_len: Some(ct),
                     content_type: Some(cl),
                     body: _,
-                } => format!("Content-Type: {}Content-Length: {}\r\n", cl, ct),
+                } => format!("Content-Type: {}\r\nContent-Length: {}\r\n", cl, ct),
                 _ => "".to_string(),
             }
         };
         let body = match &self.body {
-            Some(s) => format!("\r\n{}", s),
-            None => "".to_string(),
+            Some(s) => format!("\r\n{}\r\n", s),
+            None => "\r\n".to_string(),
         };
 
-        Ok(format!("{}{}{}\r\n", status_line, header_lines, body))
+        Ok(format!("{}{}{}", status_line, header_lines, body))
     }
 }
 
