@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     env, fs,
-    io::{BufWriter, Write, Read},
+    io::{BufWriter, Read, Write},
     net::{TcpListener, TcpStream},
     path::PathBuf,
     thread,
@@ -64,7 +64,13 @@ impl Response {
 
 impl Request {
     pub fn parse_request(request: Vec<&str>) -> Result<Self, String> {
-        if request.len() == 1 {
+        if request
+            .clone()
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .count()
+            == 1
+        {
             let line: Vec<&str> = request.get(0).unwrap().split_ascii_whitespace().collect();
             if (*line.get(0).unwrap() == "GET") && (*line.get(1).unwrap() == "/") {
                 return Ok(Request {
