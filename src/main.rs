@@ -60,6 +60,16 @@ impl Response {
 
 impl Request {
     pub fn parse_request(request: Vec<String>) -> Result<Self, String> {
+        if request.len() == 1 {
+            let line: Vec<&str> = request.get(0).unwrap().split_ascii_whitespace().collect();
+            if (*line.get(0).unwrap() == "GET") && (*line.get(1).unwrap() == "/") {
+                return Ok(Request {
+                    command: Command::GET,
+                    route: "/".to_string(),
+                    client: "".to_string(),
+                });
+            }
+        }
         if request.len() < 3 {
             Err("bad request".to_string())
         } else {
