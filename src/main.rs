@@ -45,7 +45,7 @@ impl Response {
                     content_len: Some(ct),
                     content_type: Some(cl),
                     body: _,
-                } => format!("Content-Type: {}\r\nContent-Length: {}\r\n", cl, ct),
+                } => format!("Content-Type: {}Content-Length: {}\r\n", cl, ct),
                 _ => "".to_string(),
             }
         };
@@ -54,7 +54,7 @@ impl Response {
             None => "".to_string(),
         };
 
-        Ok(format!("{}{}{}", status_line, header_lines, body))
+        Ok(format!("{}{}{}\r\n", status_line, header_lines, body))
     }
 }
 
