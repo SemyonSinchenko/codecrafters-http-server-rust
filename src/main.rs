@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     env, fs,
     io::{BufRead, BufReader, BufWriter, Write},
     net::{TcpListener, TcpStream},
@@ -17,6 +18,7 @@ struct Request {
     command: Command,
     route: String,
     client: String,
+    body: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -33,6 +35,8 @@ impl Response {
             "HTTP/1.1 404 NOT FOUND\r\n"
         } else if self.status == 200 {
             "HTTP/1.1 200 OK\r\n"
+        } else if self.status == 201 {
+            "HTTP/1.1 201 OK\r\n"
         } else {
             return Err(format!("unknown status {}", self.status));
         };
@@ -67,46 +71,77 @@ impl Request {
                     command: Command::GET,
                     route: "/".to_string(),
                     client: "".to_string(),
+                    body: None,
                 });
             }
         }
-        if request.len() < 3 {
-            Err("bad request".to_string())
-        } else {
-            let first_line: Vec<&str> = request.get(0).unwrap().split_ascii_whitespace().collect();
-            if first_line.len() < 3 {
-                return Err(format!("god bad line {}", request.get(0).unwrap()));
-            };
-            let command = match *first_line.get(0).unwrap() {
-                "GET" => Command::GET,
-                "POST" => Command::POST,
-                _ => return Err(format!("unknown command {}", first_line.get(0).unwrap())),
-            };
-            let route = first_line.get(1).unwrap();
-            let client_line: Vec<&str> = request.get(2).unwrap().split(":").collect();
 
-            let client = match client_line.get(1) {
-                None => return Err("bad client type".to_string()),
-                Some(s) => s.trim(),
-            };
+        let headers: HashMap<String, String> = {
+            request[1..]
+                .into_iter()
+                .take_while(|s| !s.is_empty())
+                .map(|s| s.split(":").collect())
+                .fold(
+                    HashMap::<String, String>::new(),
+                    |mut acc: HashMap<String, String>, val: Vec<&str>| {
+                        acc.insert(
+                            val.get(0).unwrap().trim().to_string(),
+                            val.get(1).unwrap().trim().to_string(),
+                        );
+                        acc
+                    },
+                )
+        };
 
-            println!(
-                "Got a request. Command: {}, route: {}, client-type: {}",
-                if command == Command::GET {
-                    "GET"
-                } else {
-                    "POST"
-                },
-                route,
-                client
-            );
-
-            Ok(Request {
-                command,
-                route: route.to_string(),
-                client: client.to_string(),
-            })
+        println!("Headers:");
+        for (k, v) in headers.iter() {
+            println!("{}: {}", k, v)
         }
+
+        let first_line: Vec<&str> = request.get(0).unwrap().split_ascii_whitespace().collect();
+        if first_line.len() < 3 {
+            return Err(format!("god bad line {}", request.get(0).unwrap()));
+        };
+        let command = match *first_line.get(0).unwrap() {
+            "GET" => Command::GET,
+            "POST" => Command::POST,
+            _ => return Err(format!("unknown command {}", first_line.get(0).unwrap())),
+        };
+        let route = first_line.get(1).unwrap();
+
+        let client = match headers.get("User-Agent") {
+            Some(agent) => agent,
+            None => return Err("bad client type".to_string()),
+        };
+
+        let content_length = match headers.get("Content-Length") {
+            Some(s) => match s.parse::<u16>() {
+                Ok(v) => v,
+                _ => 0,
+            },
+            None => 0,
+        };
+
+        let body = if content_length > 0 {
+            match request.get(1 + headers.len()..) {
+                Some(body_lines) => {
+                    println!("Length of body: {}", body_lines.len());
+                    Some(body_lines.join("\n"))
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
+
+        println!("body: {}", body.is_some());
+
+        Ok(Request {
+            command,
+            route: route.to_string(),
+            client: client.to_string(),
+            body,
+        })
     }
 }
 
@@ -122,6 +157,7 @@ fn generate_response(stream: &TcpStream, directory: PathBuf) -> Result<String, S
         }
     }
     println!("got request of {} lines", lines.len());
+    println!("\n\nrequest:\n{}\n\n", lines.join("\n"));
 
     let request = match Request::parse_request(lines) {
         Ok(r) => r,
@@ -201,7 +237,38 @@ fn generate_response(stream: &TcpStream, directory: PathBuf) -> Result<String, S
                 .to_pure_string()
             }
         }
-        Command::POST => return Err("not implemented yet".to_string()),
+        Command::POST => {
+            if request.route.starts_with("/files/") {
+                if request.route.len() > 7 {
+                    let path: PathBuf = directory.join(&request.route[7..]);
+
+                    match request.body {
+                        None => Err("empty body for post".to_string()),
+                        Some(b) => {
+                            println!("Body: {}", b);
+                            fs::write(path, b).unwrap();
+                            Response {
+                                status: 201,
+                                content_len: None,
+                                content_type: None,
+                                body: None,
+                            }
+                            .to_pure_string()
+                        }
+                    }
+                } else {
+                    Response {
+                        status: 404,
+                        content_len: None,
+                        content_type: None,
+                        body: None,
+                    }
+                    .to_pure_string()
+                }
+            } else {
+                Err("bad route for POST".to_string())
+            }
+        }
     }
 }
 
