@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     env, fs,
-    io::{BufRead, BufReader, BufWriter, Write},
+    io::{BufWriter, Write, Read},
     net::{TcpListener, TcpStream},
     path::PathBuf,
     thread,
@@ -63,7 +63,7 @@ impl Response {
 }
 
 impl Request {
-    pub fn parse_request(request: Vec<String>) -> Result<Self, String> {
+    pub fn parse_request(request: Vec<&str>) -> Result<Self, String> {
         if request.len() == 1 {
             let line: Vec<&str> = request.get(0).unwrap().split_ascii_whitespace().collect();
             if (*line.get(0).unwrap() == "GET") && (*line.get(1).unwrap() == "/") {
@@ -145,67 +145,82 @@ impl Request {
     }
 }
 
-fn generate_response(stream: &TcpStream, directory: PathBuf) -> Result<String, String> {
-    let request_reader = BufReader::new(stream);
-    let mut lines = Vec::<String>::new();
+fn generate_response(mut stream: &TcpStream, directory: PathBuf) -> Result<String, String> {
+    let mut buffer = [0; 1024];
 
-    for l in request_reader.lines() {
-        match l {
-            Ok(_s) if _s.is_empty() => break,
-            Ok(_s) => lines.push(_s),
-            Err(_e) => return Err("failed to parse request".to_string()),
-        }
-    }
-    println!("got request of {} lines", lines.len());
-    println!("\n\nrequest:\n{}\n\n", lines.join("\n"));
+    match stream.read(&mut buffer) {
+        Ok(n) => {
+            let req_string = String::from_utf8_lossy(&buffer[..n]);
+            let request = match Request::parse_request(req_string.split("\r\n").collect()) {
+                Ok(r) => r,
+                Err(e) => return Err(e),
+            };
 
-    let request = match Request::parse_request(lines) {
-        Ok(r) => r,
-        Err(e) => return Err(e),
-    };
+            match request.command {
+                Command::GET => {
+                    if request.route == "/" {
+                        Response {
+                            status: 200,
+                            content_len: None,
+                            content_type: None,
+                            body: None,
+                        }
+                        .to_pure_string()
+                    } else if request.route.starts_with("/echo/") {
+                        if request.route.len() > 6 {
+                            let body = &request.route[6..];
+                            Response {
+                                status: 200,
+                                content_len: Some(body.len() as u16),
+                                content_type: Some("text/plain".to_string()),
+                                body: Some(body.to_string()),
+                            }
+                            .to_pure_string()
+                        } else {
+                            return Err("bad request".to_string());
+                        }
+                    } else if request.route.starts_with("/files/") {
+                        if request.route.len() > 7 {
+                            let path = directory.join(&request.route[7..]);
+                            if path.exists() {
+                                let content = fs::read(path);
+                                match content {
+                                    Ok(s) => {
+                                        let text = String::from_utf8(s).unwrap();
 
-    match request.command {
-        Command::GET => {
-            if request.route == "/" {
-                Response {
-                    status: 200,
-                    content_len: None,
-                    content_type: None,
-                    body: None,
-                }
-                .to_pure_string()
-            } else if request.route.starts_with("/echo/") {
-                if request.route.len() > 6 {
-                    let body = &request.route[6..];
-                    Response {
-                        status: 200,
-                        content_len: Some(body.len() as u16),
-                        content_type: Some("text/plain".to_string()),
-                        body: Some(body.to_string()),
-                    }
-                    .to_pure_string()
-                } else {
-                    return Err("bad request".to_string());
-                }
-            } else if request.route.starts_with("/files/") {
-                if request.route.len() > 7 {
-                    let path = directory.join(&request.route[7..]);
-                    if path.exists() {
-                        let content = fs::read(path);
-                        match content {
-                            Ok(s) => {
-                                let text = String::from_utf8(s).unwrap();
-
+                                        Response {
+                                            status: 200,
+                                            content_len: Some(text.len() as u16),
+                                            content_type: Some(
+                                                "application/octet-stream".to_string(),
+                                            ),
+                                            body: Some(text),
+                                        }
+                                        .to_pure_string()
+                                    }
+                                    Err(_e) => return Err("error reading file".to_string()),
+                                }
+                            } else {
                                 Response {
-                                    status: 200,
-                                    content_len: Some(text.len() as u16),
-                                    content_type: Some("application/octet-stream".to_string()),
-                                    body: Some(text),
+                                    status: 404,
+                                    content_len: None,
+                                    content_type: None,
+                                    body: None,
                                 }
                                 .to_pure_string()
                             }
-                            Err(_e) => return Err("error reading file".to_string()),
+                        } else {
+                            return Err("empty path was passed".to_string());
                         }
+                    } else if request.route == "/user-agent" {
+                        let body = request.client;
+                        Response {
+                            status: 200,
+                            content_len: Some(body.len() as u16),
+                            content_type: Some("text/plain".to_string()),
+                            body: Some(body),
+                        }
+                        .to_pure_string()
                     } else {
                         Response {
                             status: 404,
@@ -215,60 +230,42 @@ fn generate_response(stream: &TcpStream, directory: PathBuf) -> Result<String, S
                         }
                         .to_pure_string()
                     }
-                } else {
-                    return Err("empty path was passed".to_string());
                 }
-            } else if request.route == "/user-agent" {
-                let body = request.client;
-                Response {
-                    status: 200,
-                    content_len: Some(body.len() as u16),
-                    content_type: Some("text/plain".to_string()),
-                    body: Some(body),
-                }
-                .to_pure_string()
-            } else {
-                Response {
-                    status: 404,
-                    content_len: None,
-                    content_type: None,
-                    body: None,
-                }
-                .to_pure_string()
-            }
-        }
-        Command::POST => {
-            if request.route.starts_with("/files/") {
-                if request.route.len() > 7 {
-                    let path: PathBuf = directory.join(&request.route[7..]);
+                Command::POST => {
+                    if request.route.starts_with("/files/") {
+                        if request.route.len() > 7 {
+                            let path: PathBuf = directory.join(&request.route[7..]);
 
-                    match request.body {
-                        None => Err("empty body for post".to_string()),
-                        Some(b) => {
-                            println!("Body: {}", b);
-                            fs::write(path, b).unwrap();
+                            match request.body {
+                                None => Err("empty body for post".to_string()),
+                                Some(b) => {
+                                    println!("Body: {}", b);
+                                    fs::write(path, b).unwrap();
+                                    Response {
+                                        status: 201,
+                                        content_len: None,
+                                        content_type: None,
+                                        body: None,
+                                    }
+                                    .to_pure_string()
+                                }
+                            }
+                        } else {
                             Response {
-                                status: 201,
+                                status: 404,
                                 content_len: None,
                                 content_type: None,
                                 body: None,
                             }
                             .to_pure_string()
                         }
+                    } else {
+                        Err("bad route for POST".to_string())
                     }
-                } else {
-                    Response {
-                        status: 404,
-                        content_len: None,
-                        content_type: None,
-                        body: None,
-                    }
-                    .to_pure_string()
                 }
-            } else {
-                Err("bad route for POST".to_string())
             }
         }
+        Err(_) => Err("error reading stream".to_string()),
     }
 }
 
