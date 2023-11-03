@@ -132,7 +132,7 @@ impl Request {
             match request.get(1 + headers.len()..) {
                 Some(body_lines) => {
                     println!("Length of body: {}", body_lines.len());
-                    Some(body_lines.join("\n"))
+                    Some(body_lines.join(""))
                 }
                 None => None,
             }
