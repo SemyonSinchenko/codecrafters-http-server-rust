@@ -1,24 +1,106 @@
-// Uncomment this block to pass the first stage
 use std::{
+    env, fs,
     io::{BufRead, BufReader, BufWriter, Write},
     net::{TcpListener, TcpStream},
+    path::PathBuf,
     thread,
 };
 
-fn generate_response_body(code: u16, len: u16, body: &str) -> String {
-    let header = format!(
-        "HTTP/1.1 {} {}\r\n",
-        code,
-        if code == 200 { "OK" } else { "Not Found" }
-    );
-    let content_header = format!(
-        "Content-Type: text/plain\r\nContent-Length: {}\r\n\r\n",
-        len
-    );
-    return format!("{}{}{}", header, content_header, body);
+#[derive(Debug, PartialEq, Eq)]
+enum Command {
+    GET,
+    POST,
 }
 
-fn parse_request(stream: &TcpStream) -> Result<String, String> {
+#[derive(Debug, PartialEq, Eq)]
+struct Request {
+    command: Command,
+    route: String,
+    client: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct Response {
+    status: u16,
+    content_type: Option<String>,
+    content_len: Option<u16>,
+    body: Option<String>,
+}
+
+impl Response {
+    pub fn to_pure_string(&self) -> Result<String, String> {
+        let status_line = if self.status == 404 {
+            "HTTP/1.1 404 NOT FOUND\r\n"
+        } else if self.status == 200 {
+            "HTTP/1.1 200 OK\r\n"
+        } else {
+            return Err(format!("unknown status {}", self.status));
+        };
+        let header_lines = if self.status == 404 {
+            "".to_string()
+        } else {
+            match self {
+                Response {
+                    status: _,
+                    content_len: Some(ct),
+                    content_type: Some(cl),
+                    body: _,
+                } => format!("Content-Type: {}\r\nContent-Length: {}\r\n", cl, ct),
+                _ => "".to_string(),
+            }
+        };
+        let body = match &self.body {
+            Some(s) => format!("\r\n{}", s),
+            None => "".to_string(),
+        };
+
+        Ok(format!("{}{}{}", status_line, header_lines, body))
+    }
+}
+
+impl Request {
+    pub fn parse_request(request: Vec<String>) -> Result<Self, String> {
+        if request.len() < 3 {
+            Err("bad request".to_string())
+        } else {
+            let first_line: Vec<&str> = request.get(0).unwrap().split_ascii_whitespace().collect();
+            if first_line.len() < 3 {
+                return Err(format!("god bad line {}", request.get(0).unwrap()));
+            };
+            let command = match *first_line.get(0).unwrap() {
+                "GET" => Command::GET,
+                "POST" => Command::POST,
+                _ => return Err(format!("unknown command {}", first_line.get(0).unwrap())),
+            };
+            let route = first_line.get(1).unwrap();
+            let client_line: Vec<&str> = request.get(2).unwrap().split(":").collect();
+
+            let client = match client_line.get(1) {
+                None => return Err("bad client type".to_string()),
+                Some(s) => s.trim(),
+            };
+
+            println!(
+                "Got a request. Command: {}, route: {}, client-type: {}",
+                if command == Command::GET {
+                    "GET"
+                } else {
+                    "POST"
+                },
+                route,
+                client
+            );
+
+            Ok(Request {
+                command,
+                route: route.to_string(),
+                client: client.to_string(),
+            })
+        }
+    }
+}
+
+fn generate_response(stream: &TcpStream, directory: PathBuf) -> Result<String, String> {
     let request_reader = BufReader::new(stream);
     let mut lines = Vec::<String>::new();
 
@@ -29,58 +111,99 @@ fn parse_request(stream: &TcpStream) -> Result<String, String> {
             Err(_e) => return Err("failed to parse request".to_string()),
         }
     }
-
     println!("got request of {} lines", lines.len());
 
-    if lines.len() == 0 {
-        return Err("empty string was passed".to_string());
-    }
+    let request = match Request::parse_request(lines) {
+        Ok(r) => r,
+        Err(e) => return Err(e),
+    };
 
-    let words: Vec<&str> = lines.get(0).unwrap().split_ascii_whitespace().collect();
-    let (command, arg) = (words.get(0).unwrap_or(&""), words.get(1).unwrap_or(&""));
-
-    println!("got {} {}", command, arg);
-
-    match *command {
-        "GET" => {
-            let response = if *arg == "/" {
-                "HTTP/1.1 200 OK\r\n\r\n".to_string()
-            } else if arg.starts_with("/echo/") && arg.len() > 6 {
-                let input_str = &arg[6..];
-                generate_response_body(200, input_str.len() as u16, input_str)
-            } else if *arg == "/user-agent" {
-                if lines.len() < 3 {
-                    return Err("wrong request".to_string());
-                } else {
-                    let user_agent = lines.get(2).unwrap();
-                    if !user_agent.starts_with("User-Agent: ") {
-                        return Err("wrong request, bad header".to_string());
-                    } else {
-                        generate_response_body(
-                            200,
-                            (user_agent.len() - 12) as u16,
-                            user_agent[11..].trim(),
-                        )
-                    }
+    match request.command {
+        Command::GET => {
+            if request.route == "/" {
+                Response {
+                    status: 200,
+                    content_len: None,
+                    content_type: None,
+                    body: None,
                 }
+                .to_pure_string()
+            } else if request.route.starts_with("/echo/") {
+                if request.route.len() > 6 {
+                    let body = &request.route[6..];
+                    Response {
+                        status: 200,
+                        content_len: Some(body.len() as u16),
+                        content_type: Some("text/plain".to_string()),
+                        body: Some(body.to_string()),
+                    }
+                    .to_pure_string()
+                } else {
+                    return Err("bad request".to_string());
+                }
+            } else if request.route.starts_with("/files/") {
+                if request.route.len() > 7 {
+                    let path = directory.join(&request.route[7..]);
+                    if path.exists() {
+                        let content = fs::read(path);
+                        match content {
+                            Ok(s) => {
+                                let text = String::from_utf8(s).unwrap();
+
+                                Response {
+                                    status: 200,
+                                    content_len: Some(text.len() as u16),
+                                    content_type: Some("application/octet-stream".to_string()),
+                                    body: Some(text),
+                                }
+                                .to_pure_string()
+                            }
+                            Err(_e) => return Err("error reading file".to_string()),
+                        }
+                    } else {
+                        Response {
+                            status: 404,
+                            content_len: None,
+                            content_type: None,
+                            body: None,
+                        }
+                        .to_pure_string()
+                    }
+                } else {
+                    return Err("empty path was passed".to_string());
+                }
+            } else if request.route == "/user-agent" {
+                let body = request.client;
+                Response {
+                    status: 200,
+                    content_len: Some(body.len() as u16),
+                    content_type: Some("text/plain".to_string()),
+                    body: Some(body),
+                }
+                .to_pure_string()
             } else {
-                "HTTP/1.1 404 NOT FOUND\r\n\r\n".to_string()
-            };
-            Ok(response)
+                Response {
+                    status: 404,
+                    content_len: None,
+                    content_type: None,
+                    body: None,
+                }
+                .to_pure_string()
+            }
         }
-        s => Err(format!("unknown command {}", s)),
+        Command::POST => return Err("not implemented yet".to_string()),
     }
 }
 
-fn handle_connection(stream: std::io::Result<TcpStream>) -> Result<(), String> {
+fn handle_connection(stream: std::io::Result<TcpStream>, directory: PathBuf) -> Result<(), String> {
     match stream {
         Ok(mut _stream) => {
             println!("accepted new connection");
-            let response = parse_request(&_stream);
+            let response = generate_response(&_stream, directory);
 
             match response {
                 Ok(_s) => {
-                    println!("{}", _s);
+                    println!("Response:\n{}", _s);
                     BufWriter::new(&_stream).write_all(_s.as_bytes()).unwrap();
                     let _ = _stream.flush();
                     Ok(())
@@ -100,11 +223,20 @@ fn handle_connection(stream: std::io::Result<TcpStream>) -> Result<(), String> {
 
 fn main() {
     println!("Logs from your program will appear here!");
+    let mut directory = PathBuf::from(".");
+    let mut args = env::args().into_iter();
+
+    while let Some(arg) = args.next() {
+        if arg == "--directory" {
+            directory = PathBuf::from(args.next().unwrap());
+            break;
+        }
+    }
+    println!("working directory: {}", directory.display());
 
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
     for stream in listener.incoming() {
-        thread::spawn(move || {
-            let _ = handle_connection(stream);
-        });
+        let dir = directory.clone();
+        thread::spawn(move || handle_connection(stream, dir));
     }
 }
